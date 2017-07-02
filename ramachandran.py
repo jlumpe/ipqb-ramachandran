@@ -41,6 +41,158 @@ PDBAtom = namedtuple('PDBAtom', [field for b, e, t, field in PDB_ATOM_LINE_FIELD
 PDBResidue = namedtuple('PDBResidue', 'resName,chainID,resSeq,atoms')
 
 
+class Vector3(tuple):
+	"""A three dimensional real-valued vector.
+
+	Would be better to use Numpy for these but this seems to be part of the
+	assignment. Implements all numeric magic methods that make sense for a
+	vector type.
+
+	Dot and cross products can be calculated through the use of the * and @
+	(matrix multiplication) operators, respectively:
+
+	>>> Vector3(1, 2, 3) * Vector3(4, 5, 6)
+	32.0
+
+	>>> Vector3(1, 2, 3) @ Vector3(4, 5, 6)
+	Vector3(1, 2, 3) * Vector3(4, 5, 6)
+	"""
+
+	def __new__(cls, *args):
+
+		if len(args) == 0:
+			coords = (0, 0, 0)
+
+		elif len(args) == 1:
+			if isinstance(args[0], Vector3):
+				return args[0]
+
+			coords = list(args[0])
+			if len(coords) != 3:
+				raise ValueError('')
+
+		elif len(args) == 3:
+			coords = args
+
+		else:
+			raise TypeError('Constructor takes 0, 1 or 3 positional arguments')
+
+		# Convert to floats
+		return super().__new__(cls, map(float, coords))
+
+	@property
+	def x(self):
+		return self[0]
+
+	@property
+	def y(self):
+		return self[1]
+
+	@property
+	def z(self):
+		return self[2]
+
+	def __bool__(self):
+		"""Truthy if not the zero vector."""
+		return any(c != 0 for c in self)
+
+	def __add__(self, other):
+		if isinstance(other, Vector3):
+			return Vector3(self.x + other.x, self.y + other.y, self.z + other.z)
+		else:
+			return NotImplemented
+
+	def __sub__(self, other):
+		if isinstance(other, Vector3):
+			return Vector3(self.x - other.x, self.y - other.y, self.z - other.z)
+		else:
+			return NotImplemented
+
+	def __mul__(self, other):
+		if isinstance(other, (int, float)):
+			# Multiplication by scalar
+			return Vector3(self.x * other, self.y * other, self.z * other)
+		elif isinstance(other, Vector3):
+			# Dot product with another vector
+			return self.dot(other)
+		else:
+			return NotImplemented
+
+	def __rmul__(self, other):
+		if isinstance(other, (int, float)):
+			return self * other
+		else:
+			return NotImplemented
+
+	def __truediv__(self, scalar):
+		if isinstance(scalar, (int, float)):
+			return Vector3(self.x / scalar, self.y / scalar, self.z / scalar)
+		else:
+			return NotImplemented
+
+	def norm2(self):
+		"""Get the vector's squared norm.
+
+		:rtype: float
+		"""
+		return self.x ** 2 + self.y ** 2 + self.z ** 2
+
+	def norm(self):
+		"""Get the vector's magnitude.
+
+		:rtype: float
+		"""
+		return math.sqrt(self.norm2())
+
+	def __abs__(self):
+		return self.norm()
+
+	def __neg__(self):
+		return Vector3(-self.x, -self.y, -self.z)
+
+	def __pos__(self):
+		return self
+
+	def normalize(self):
+		"""Get a normalized version of the vector with unit magnitude.
+
+		:rtype: .Vector3d
+		"""
+		norm = self.norm()
+		if norm == 0:
+			raise ValueError("Can't normalize zero vector")
+		return self / norm
+
+	def dot(self, other):
+		"""Calculate the dot product of this vector with another.
+
+		:type other: .Vector3
+		:rtype: float
+		"""
+		return self.x * other.x + self.y * other.y + self.z * other.z
+
+	def __matmul__(self, other):
+		if isinstance(other, Vector3):
+			return self.cross(other)
+		else:
+			return NotImplemented
+
+	def cross(self, other):
+		"""Calculate the cross product of this vector with another.
+
+		:type other: .Vector3
+		:rtype: float
+		"""
+		return Vector3(
+			self.y * other.z - self.z * other.y,
+			self.z * other.x - self.x * other.z,
+			self.x * other.y - self.y * other.x,
+		)
+
+	def __repr__(self):
+		return '{}({}, {}, {})'.format(type(self).__name__, *self)
+
+
 def parse_pdb_atom(line):
 	"""Parse an ATOM line from a PDB file.
 
