@@ -271,3 +271,121 @@ def parse_pdb_chain(fobj):
 
 	if currentres is not None:
 		yield currentres
+
+
+def calculate_dihedrals_lazy():
+	"""
+	Coroutine/generator which lazily calculates dihedral angles for each set of
+	4 contiguous points in a sequence.
+
+	The generator must be sent points one at a time. Points May be
+	:class:`.Vector3` or any sequence of x, y, and z coordinates. The yielded
+	value will be the dihedral angle for the sent point and the previous three,
+	or None if less than four points have been sent so far.
+
+	Angles are in radians in the range (-pi, pi).
+
+	Source for method: https://math.stackexchange.com/a/47084/252073
+	"""
+
+	# Prime with first 3 points
+	p1 = Vector3((yield None))
+	p2 = Vector3((yield None))
+	p3 = Vector3((yield None))
+
+	# Set up for first angle
+	lastpoint = p3
+	lastdisp = p3 - p2
+	lastnormal = ((p2 - p1) @ lastdisp).normalize()
+
+	angle = None
+
+	# For each point starting with the 4th, we can compute a new angle
+	while True:
+
+		# Yield the last angle (None the first time), get the next point
+		nextpoint = Vector3((yield angle))
+
+		# Displacement from previous point to current
+		nextdisp = nextpoint - lastpoint
+
+		# Normal vector to plane containing last 3 points
+		nextnormal = (lastdisp @ nextdisp).normalize()
+
+		# This one's complicated... see step 3 in source.
+		x = lastnormal * nextnormal
+		y = (lastnormal @ lastdisp).normalize() * nextnormal
+		angle = math.atan2(x, y)
+
+		# Current values used as previous in next loop
+		lastpoint = nextpoint
+		lastdisp = nextdisp
+		lastnormal = nextnormal
+
+
+def get_backbone_atoms(residue):
+	"""Get the N, CA, and CB atoms from an amino acid residue.
+
+	:param residue: Amino acid residue to get backbone atoms for.
+	:type residue: .PDBResidue
+	:returns: ``(N, CA, CB)`` atom tuple.
+	:rtype: tuple[.PDBAtom]
+
+	:raises ValueError: If the residue is missing one of the atom type or has
+		multiple instances of it.
+	"""
+
+	# Glycines seem to use C instead of CB for some reason...
+	if residue.name == 'GLY':
+		names = ['N', 'CA', 'C']
+	else:
+		names = ['N', 'CA', 'CB']
+
+	atoms = [None] * len(names)
+
+	# Find atoms
+	for atom in residue.atoms:
+		for i, name in enumerate(names):
+			if atom.name == name:
+				if atoms[i] is not None:
+					raise ValueError('Duplicate {} atom in residue'.format(name))
+
+				atoms[i] = atom
+				break
+
+	# Check all found
+	for i, name in enumerate(names):
+		if atoms[i] is None:
+			raise ValueError('No {} atom found in residue'.format(name))
+
+	return tuple(atoms)
+
+
+def calculate_torsion(residues, calc_omega=False):
+
+	angle_calculator = calculate_dihedrals_lazy()
+	angle_calculator.send(None)  # Prime it
+
+	last_residue = None
+
+	for residue in residues:
+
+		# Get N, CA, and CB atoms from residue
+		backbone_coords = [a.coord for a in get_backbone_atoms(residue)]
+
+		# For each atom, calculate dihedral angle for it and the previous 3 in
+		# the backbone
+		# (Will be None if we haven't primed the generator with a previous
+		# residue yet, but we won't yield the results in that case anyways).
+		omega = angle_calculator.send(backbone_coords[0])
+		phi = angle_calculator.send(backbone_coords[1])
+		psi = angle_calculator.send(backbone_coords[2])
+
+		# Only yield if contiguous with last residue seen
+		if last_residue is not None and residue.seq == last_residue.seq + 1:
+			if calc_omega:
+				yield residue, omega, phi, psi
+			else:
+				yield residue, phi, psi
+
+		last_residue = residue
