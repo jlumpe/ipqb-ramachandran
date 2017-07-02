@@ -63,7 +63,7 @@ def parse_pdb_atom(line):
 
 
 def parse_pdb_chain(fobj):
-	"""Parse a chain of residues from a PDB file.
+	"""Lazily parse a chain of residues from a PDB file.
 
 	File must contain only a single chain.
 
@@ -72,10 +72,9 @@ def parse_pdb_chain(fobj):
 
 	:param fobj: Open file object in text mode. Alternatively, may be any
 		iterable of PDB file lines.
-	:returns: List of :class:`.PDBResidue`.
+	:returns: Generator yielding :class:`.PDBResidue`.
 	"""
 
-	residues = []
 	currentres = None
 
 	for line in fobj:
@@ -93,10 +92,8 @@ def parse_pdb_chain(fobj):
 			if currentres is not None and atom.chainID != currentres.chainID:
 				raise ValueError('PDB files with multiple chains not supported.')
 
+			yield currentres
 			currentres = PDBResidue(atom.resName, atom.chainID, atom.resSeq, [])
-			residues.append(currentres)
 
 		# Add atom to residue
 		currentres.atoms.append(atom)
-
-	return residues
