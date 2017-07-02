@@ -34,11 +34,24 @@ PDB_ATOM_LINE_FIELDS = [
 
 
 # Named tuple containing parsed data from an ATOM line in a PDB file
-PDBAtom = namedtuple('PDBAtom', [field for b, e, t, field in PDB_ATOM_LINE_FIELDS])
+PDBAtom = namedtuple('PDBAtom', [
+	'serial',
+	'name',
+	'altLoc',
+	'resName',
+	'chainID',
+	'resSeq',
+	'iCode',
+	'coord',
+	'occupancy',
+	'tempFactor',
+	'element',
+	'charge',
+])
 
 
 # Namde tuple containing parsed data on a PDB residue and its atoms
-PDBResidue = namedtuple('PDBResidue', 'resName,chainID,resSeq,atoms')
+PDBResidue = namedtuple('PDBResidue', 'name, chainID, seq, atoms')
 
 
 class Vector3(tuple):
@@ -199,7 +212,7 @@ def parse_pdb_atom(line):
 	:type line: str
 	:rtype: .PDBAtom
 	"""
-	elems = []
+	attrs = dict()
 
 	for begin, end, type_, fieldname in PDB_ATOM_LINE_FIELDS:
 		strval = line[begin:end].strip()
@@ -209,9 +222,13 @@ def parse_pdb_atom(line):
 		else:
 			val = None
 
-		elems.append(val)
+		attrs[fieldname] = val
 
-	return PDBAtom(*elems)
+	# Combine x, y, z, field values into a single attribute
+	attrs['coord'] = Vector3(attrs['x'], attrs['y'], attrs['z'])
+	del attrs['x'], attrs['y'], attrs['z']
+
+	return PDBAtom(**attrs)
 
 
 def parse_pdb_chain(fobj):
@@ -238,14 +255,19 @@ def parse_pdb_chain(fobj):
 		atom = parse_pdb_atom(line.strip())
 
 		# Create a new residue if needed
-		if currentres is None or atom.resSeq != currentres.resSeq:
+		if currentres is None or atom.resSeq != currentres.seq:
 
-			# Check same chain
-			if currentres is not None and atom.chainID != currentres.chainID:
-				raise ValueError('PDB files with multiple chains not supported.')
+			if currentres is not None:
+				# Check same chain
+				if atom.chainID != currentres.chainID:
+					raise ValueError('PDB files with multiple chains not supported.')
 
-			yield currentres
+				yield currentres
+
 			currentres = PDBResidue(atom.resName, atom.chainID, atom.resSeq, [])
 
-		# Add atom to residue
+		# Add atom to current residue
 		currentres.atoms.append(atom)
+
+	if currentres is not None:
+		yield currentres
