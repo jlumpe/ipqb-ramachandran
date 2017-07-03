@@ -1,7 +1,14 @@
+#!/usr/bin/env python
+
 """iPQB boot camp homework assignment.
 
 Author: (Michael) Jared Lumpe
 
+Contains functions for (partially) parsing PDB files, calculating torsion angles
+for polypeptides, and making several types of Ramachandran plots.
+
+May be run as a script to parse PDB files and output a plot (run with no
+arguments to print usage).
 
 PDB files used as input are assumed to be version 3.3, see
 http://www.wwpdb.org/documentation/file-format-content/format33/v3.3.html
@@ -11,6 +18,8 @@ for documentation on the format.
 from collections import namedtuple
 
 import math
+import argparse
+import os
 
 
 ################################################################################
@@ -744,3 +753,83 @@ def ramachandran_kdeplot(data, degrees=True, **kwargs):
 		format_ramachandran_axes_radians(ax)
 
 	return ax
+
+
+################################################################################
+#
+# Command line interface
+#
+################################################################################
+
+cli = argparse.ArgumentParser(
+	description='Parse PDB files and create a Ramachandran plot.'
+)
+cli.add_argument('files', nargs='+', type=argparse.FileType('rt'),
+                 help='PDB files to parse')
+cli.add_argument('-t', '--type', dest='plottype', type=str, default='hexbin',
+                 choices=['hexbin', 'scatter', 'kde', 'joint'],
+                 help='Type of plot to produce')
+cli.add_argument('-r', '--radians', action='store_true',
+                 help='Label axes with radians instead of degrees')
+cli.add_argument('--log', action='store_true',
+                 help='Use log color scale for hexbin plot')
+cli.add_argument('--cbar', action='store_true',
+                 help='Display color bar for hexbin plot')
+
+
+def main():
+	"""Execute command line interface."""
+
+	import numpy as np
+	import matplotlib as mpl
+
+	args = cli.parse_args()
+
+	# Use TK interactive backend as it should work on all installations
+	mpl.use('tkagg')
+
+	# Turn on interactive plotting (pyplot import must come after call to use())
+	import matplotlib.pyplot as plt
+	plt.ion()
+
+	# Get torsion angle arrays for all input files
+	arrays = []
+	for fobj in args.files:
+		chain = list(parse_pdb_chain(fobj))
+		arrays.append(torsion_array(chain))
+
+	angles = np.concatenate(arrays, axis=0)
+
+	# Make the plot
+	if args.plottype == 'hexbin':
+		hb = ramachandran_hexbin(angles, log=args.log, degrees=not args.radians)
+		if args.cbar:
+			plt.colorbar(hb)
+
+	elif args.plottype == 'scatter':
+		ramachandran_scatter(angles, degrees=not args.radians)
+
+	elif args.plottype == 'kde':
+		ramachandran_kdeplot(angles, shade=True, degrees=not args.radians)
+
+	elif args.plottype == 'joint':
+		ramachandran_jointplot(angles, kind='kde', degrees=not args.radians)
+
+	else:
+		raise ValueError(args.plottype)
+
+	# Plot title
+	if len(args.files) == 1:
+		filename = os.path.basename(args.files[0].name)
+	else:
+		filename = '{} files'.format(len(args.files))
+
+	plt.gcf().suptitle('{} ({} residues)'.format(filename, angles.shape[0]))
+
+	# Show the plot, blocking until closed
+	plt.show(block=True)
+
+
+# Call main func if run as script
+if __name__ == '__main__':
+	main()
