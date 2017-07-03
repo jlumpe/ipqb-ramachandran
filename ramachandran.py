@@ -273,7 +273,7 @@ def parse_pdb_chain(fobj):
 		yield currentres
 
 
-def calculate_dihedrals_lazy():
+def dihedral_calculator():
 	"""
 	Coroutine/generator which lazily calculates dihedral angles for each set of
 	4 contiguous points in a sequence.
@@ -314,8 +314,8 @@ def calculate_dihedrals_lazy():
 
 		# This one's complicated... see step 3 in source.
 		x = lastnormal * nextnormal
-		y = (lastnormal @ lastdisp).normalize() * nextnormal
-		angle = math.atan2(x, y)
+		y = (lastnormal @ lastdisp.normalize()) * nextnormal
+		angle = -math.atan2(y, x)
 
 		# Current values used as previous in next loop
 		lastpoint = nextpoint
@@ -323,8 +323,32 @@ def calculate_dihedrals_lazy():
 		lastnormal = nextnormal
 
 
+def calc_dihedrals(points):
+	"""Lazily calculate dihedral angles for a set of points.
+
+	Angles are in radians in the range (-pi, pi).
+
+	:param points: Iterable of 3D points, as :class:`.Vector3` or any other
+		sequences of x, y, z coordinates.
+	:returns: Generator yielding dihedral angles for each contiguous set of 4
+		points.
+	"""
+	piter = iter(points)
+
+	calculator = dihedral_calculator()
+	calculator.send(None)
+
+	for i in range(3):
+		calculator.send(next(piter))
+
+	for point in piter:
+		yield calculator.send(point)
+
+
 def get_backbone_atoms(residue):
 	"""Get the N, CA, and CB atoms from an amino acid residue.
+
+	Note that glycine residues seem to have a "C" atom in place of a "CB".
 
 	:param residue: Amino acid residue to get backbone atoms for.
 	:type residue: .PDBResidue
@@ -335,11 +359,11 @@ def get_backbone_atoms(residue):
 		multiple instances of it.
 	"""
 
-	# Glycines seem to use C instead of CB for some reason...
+	# Glycines use C instead of CB
 	if residue.name == 'GLY':
 		names = ['N', 'CA', 'C']
 	else:
-		names = ['N', 'CA', 'CB']
+		names = ['N', 'CA', 'C']
 
 	atoms = [None] * len(names)
 
@@ -361,31 +385,64 @@ def get_backbone_atoms(residue):
 	return tuple(atoms)
 
 
-def calculate_torsion(residues, calc_omega=False):
+def calc_torsion(residues, calc_omega=False):
+	"""Lazily calculate phi/psi torsion angles for an amino acid sequence.
 
-	angle_calculator = calculate_dihedrals_lazy()
+	The residues must have strictly increasing sequence IDs, but some positions
+	may be skipped. If a residue is not contiguous with the residues before and
+	after the angles returned will be None. The first residue will have None
+	values for omega and phi and the last will have a None value for psi.
+
+	:param residues: Iterable of amino acid residues as :class:`.PDBResidue`.
+	:param bool calc_omega: Also yield values for the omega angle.
+
+	:returns: Generator yielding ``(residue, phi, psi)`` tuples, or
+		``(residue, omega, phi, psi)`` if ``calc_omega`` is True.
+	"""
+
+	angle_calculator = dihedral_calculator()
 	angle_calculator.send(None)  # Prime it
 
 	last_residue = None
+	last_contiguous = True
+
+	omega = None
+	phi = None
+	psi = None
 
 	for residue in residues:
+		is_contiguous = last_residue is None or residue.seq == last_residue.seq + 1
 
-		# Get N, CA, and CB atoms from residue
+		# Get N, CA, and C atoms from residue
 		backbone_coords = [a.coord for a in get_backbone_atoms(residue)]
 
-		# For each atom, calculate dihedral angle for it and the previous 3 in
-		# the backbone
-		# (Will be None if we haven't primed the generator with a previous
-		# residue yet, but we won't yield the results in that case anyways).
-		omega = angle_calculator.send(backbone_coords[0])
-		phi = angle_calculator.send(backbone_coords[1])
-		psi = angle_calculator.send(backbone_coords[2])
+		# Psi ends with this residue's N, but belongs to previous
+		psi = angle_calculator.send(backbone_coords[0])
 
-		# Only yield if contiguous with last residue seen
-		if last_residue is not None and residue.seq == last_residue.seq + 1:
-			if calc_omega:
-				yield residue, omega, phi, psi
+		if last_residue is not None:
+			# Only yield if contiguous with adjacent residues
+			if is_contiguous and last_contiguous:
+				if calc_omega:
+					yield last_residue, omega, phi, psi
+				else:
+					yield last_residue, phi, psi
+
 			else:
-				yield residue, phi, psi
+				if calc_omega:
+					yield last_residue, None, None, None
+				else:
+					yield last_residue, None, None
+
+		# Omega and phi end with this residue's CA and C atoms, will be yielded
+		# on the next loop
+		omega = angle_calculator.send(backbone_coords[1])
+		phi = angle_calculator.send(backbone_coords[2])
 
 		last_residue = residue
+		last_contiguous = is_contiguous
+
+	# Last one is only partial - no value for psi
+	if calc_omega:
+		yield last_residue, omega, phi, None
+	else:
+		yield last_residue, phi, None
