@@ -7,12 +7,6 @@ from Bio import PDB
 from ramachandran import parse_pdb_chain
 
 
-@pytest.fixture
-def pdbfile():
-	"""Path to a PDB file to parse. You'll need to actually put it there."""
-	return 'structures/12asA00'
-
-
 def test_parse_chain(pdbfile):
 	"""Test parsing residues from a PDB file vs the BioPython implementation."""
 
