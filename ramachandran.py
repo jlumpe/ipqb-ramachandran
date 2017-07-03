@@ -497,3 +497,232 @@ def torsion_array(residues, include_ends=False, include_omega=False):
 			array[i, j] = np.nan if a is None else a
 
 	return array
+
+
+def format_ramachandran_axes_degrees(ax):
+	"""Format matplotlib axes for a ramachandran plot in degrees.
+
+	Sets axis limits, labels, and formats tick labels.
+
+	:param ax: Axes to format.
+	:type ax: matplotlib.axes.Axes
+	"""
+
+	# Phi and psi labels
+	ax.set_xlabel('$\\phi$')
+	ax.set_ylabel('$\\psi$')
+
+	# Axis limits
+	ax.set_xlim([-180, 180])
+	ax.set_ylim([-180, 180])
+
+	# Degree sign in tick labels
+	from matplotlib.ticker import StrMethodFormatter
+	formatter = StrMethodFormatter('{x}\u00b0')
+	ax.xaxis.set_major_formatter(formatter)
+	ax.yaxis.set_major_formatter
+
+
+def format_ramachandran_axes_radians(ax):
+	"""Format matplotlib axes for a ramachandran plot in radians.
+
+	Sets axis limits, labels, and formats tick labels.
+
+	Axis tick labels will include a pi symbol, but actual data values won't be
+	multiples of pi. So data should be scaled by 1/pi before plotting.
+
+	:param ax: Axes to format.
+	:type ax: matplotlib.axes.Axes
+	"""
+
+	# Phi and psi labels
+	ax.set_xlabel('$\\phi$')
+	ax.set_ylabel('$\\psi$')
+
+	# Axis limits
+	ax.set_xlim([-1, 1])
+	ax.set_ylim([-1, 1])
+
+	# Pi in tick labels
+	from matplotlib.ticker import StrMethodFormatter
+	formatter = StrMethodFormatter('{x}\u03c0')
+	ax.xaxis.set_major_formatter(formatter)
+	ax.yaxis.set_major_formatter(formatter)
+
+
+def get_ramachandran_xy(data, scale=None):
+	"""Convert torsion angle data into a consistent format for plotting.
+
+	:param data: Phi and psi angles either as a list of 2-tuples or a numpy
+		array with pairs of angles in rows.
+	:param str scale: Scale the data. Valid values are "degrees" to convert
+		from radians to degrees and "overpi" to divide by pi in order to use
+		radians for the axis ticks.
+	:returns: ``(x, y)`` (``(phi, psi)``) tuple of 1D numpy arrays.
+	:rtype: tuple[numpy.ndarray]
+	"""
+
+	import numpy as np
+
+	if isinstance(data, np.ndarray):
+		x, y = data.T
+
+	else:
+		x, y = map(np.asarray, zip(*data))
+
+	if scale == 'degrees':
+		x, y = map(np.rad2deg, (x, y))
+
+	elif scale == 'overpi':
+		x, y = x / np.pi, y / np.pi
+
+	elif scale is not None:
+		raise ValueError(scale)
+
+	return x, y
+
+
+def ramachandran_hexbin(data, ax=None, degrees=True, log=False, **kwargs):
+	"""Ramachandran plot using :func:`matplotlib.pyplot.hexbin`.
+
+	:param data: Phi and psi angles either as a list of 2-tuples or a numpy
+		array with pairs of angles in rows.
+	:param ax: Axis to plot on. If None will use current axis.
+	:type ax: matplotlib.axes.Axes
+	:param bool degrees: Format axes for degrees (True) or radians (False).
+	:param bool log: Color bins according to log-density.
+	:param \\**kwargs: Additional keyword arguments to
+		:func:`matplotlib.pyplot.hexbin`.
+
+	:returns: Return value of the ``hexbin()`` function.
+	:rtype: matplotlib.collections.PolyCollection
+	"""
+
+	import matplotlib.pyplot as plt
+
+	# Default arguments to hexbin()
+	kwargs.setdefault('cmap', 'magma')
+	if log:
+		kwargs.setdefault('bins', 'log')
+
+	# Get scaled x/y values
+	x, y = get_ramachandran_xy(data, 'degrees' if degrees else 'overpi')
+
+	# Use current axis by default
+	if ax is None:
+		ax = plt.gca()
+
+	# Plot hexbin
+	extent = (-180, 180, -180, 180) if degrees else (-1, 1, -1, 1)
+	hb = ax.hexbin(x, y, extent=extent, **kwargs)
+
+	# Format axes
+	if degrees:
+		format_ramachandran_axes_degrees(ax)
+	else:
+		format_ramachandran_axes_radians(ax)
+
+	return hb
+
+
+def ramachandran_scatter(data, ax=None, degrees=True, **kwargs):
+	"""Ramachandran plot using :func:`matplotlib.pyplot.scatter`.
+
+	:param data: Phi and psi angles either as a list of 2-tuples or a numpy
+		array with pairs of angles in rows.
+	:param ax: Axis to plot on. If None will use current axis.
+	:type ax: matplotlib.axes.Axes
+	:param bool degrees: Format axes for degrees (True) or radians (False).
+	:param \\**kwargs: Additional keyword arguments to
+		:func:`matplotlib.pyplot.scatter`.
+
+	:returns: Return value of the ``scatter()`` function.
+	:rtype: matplotlib.collections.PathCollection
+	"""
+
+	import matplotlib.pyplot as plt
+
+	# Get scaled x/y values
+	x, y = get_ramachandran_xy(data, 'degrees' if degrees else 'overpi')
+
+	# Use current axis by default
+	if ax is None:
+		ax = plt.gca()
+
+	# Plot scatter
+	plot = ax.scatter(x, y, **kwargs)
+
+	# Format axes
+	if degrees:
+		format_ramachandran_axes_degrees(ax)
+	else:
+		format_ramachandran_axes_radians(ax)
+
+	return plot
+
+
+def ramachandran_jointplot(data, degrees=True, **kwargs):
+	"""Ramachandran plot using :func:`seaborn.jointplot`.
+
+	Requires the seaborn package.
+
+	:param data: Phi and psi angles either as a list of 2-tuples or a numpy
+		array with pairs of angles in rows.
+	:param bool degrees: Format axes for degrees (True) or radians (False).
+	:param \\**kwargs: Additional keyword arguments to :func:`seaborn.jointplot`.
+
+	:returns: Return value of the ``jpointplot()`` function.
+	:rtype: seaborn.axisgrid.JointGrid
+	"""
+
+	from seaborn import jointplot
+
+	# Default arguments to jointplot()
+	kwargs.setdefault('stat_func', None)
+
+	# Get scaled x/y values
+	x, y = get_ramachandran_xy(data, 'degrees' if degrees else 'overpi')
+
+	# Plot jointplot
+	lim = (-180, 180) if degrees else (-1, 1)
+	plot = jointplot(x, y, xlim=lim, ylim=lim, **kwargs)
+
+	# Format axes
+	if degrees:
+		format_ramachandran_axes_degrees(plot.ax_joint)
+	else:
+		format_ramachandran_axes_radians(plot.ax_joint)
+
+	return plot
+
+
+def ramachandran_kdeplot(data, degrees=True, **kwargs):
+	"""Ramachandran plot using :func:`seaborn.kdeplot`.
+
+	Requires the seaborn package.
+
+	:param data: Phi and psi angles either as a list of 2-tuples or a numpy
+		array with pairs of angles in rows.
+	:param bool degrees: Format axes for degrees (True) or radians (False).
+	:param \\**kwargs: Additional keyword arguments to
+		:func:`seaborn.kdeplot`.
+
+	:returns: Return value of the ``kdeplot()`` function.
+	:rtype: matplotlib.axes.Axes
+	"""
+
+	from seaborn import kdeplot
+
+	# Get scaled x/y values
+	x, y = get_ramachandran_xy(data, 'degrees' if degrees else 'overpi')
+
+	# Plot jointplot
+	ax = kdeplot(x, y, **kwargs)
+
+	# Format axes
+	if degrees:
+		format_ramachandran_axes_degrees(ax)
+	else:
+		format_ramachandran_axes_radians(ax)
+
+	return ax
