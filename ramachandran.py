@@ -20,6 +20,7 @@ from collections import namedtuple
 import math
 import argparse
 import os
+import sys
 
 
 ################################################################################
@@ -764,7 +765,7 @@ def ramachandran_kdeplot(data, degrees=True, **kwargs):
 cli = argparse.ArgumentParser(
 	description='Parse PDB files and create a Ramachandran plot.'
 )
-cli.add_argument('files', nargs='+', type=argparse.FileType('rt'),
+cli.add_argument('files', nargs='+', type=str,
                  help='PDB files to parse')
 cli.add_argument('-t', '--type', dest='plottype', type=str, default='hexbin',
                  choices=['hexbin', 'scatter', 'kde', 'joint'],
@@ -777,13 +778,37 @@ cli.add_argument('--cbar', action='store_true',
                  help='Display color bar for hexbin plot')
 
 
+def _exit(message):
+	"""Print a message to stderr and exit with non-zero exit code."""
+	print('ERROR: ' + message, file=sys.stderr)
+	sys.exit(1)
+
+
+def _assert_seaborn_available(plottype):
+	"""Print error message and quit if seaborn not available."""
+	try:
+		import seaborn
+
+	except ImportError:
+		_exit(
+			'The seaborn package must be installed to create {} plots'
+			.format(plottype)
+		)
+
+
 def main():
 	"""Execute command line interface."""
 
 	import numpy as np
 	import matplotlib as mpl
 
+	# Parse arguments
 	args = cli.parse_args()
+
+	# Check all files exist
+	for filepath in args.files:
+		if not os.path.isfile(filepath):
+			_exit('file {} does not exist'.format(filepath))
 
 	# Use TK interactive backend as it should work on all installations
 	mpl.use('tkagg')
@@ -794,9 +819,10 @@ def main():
 
 	# Get torsion angle arrays for all input files
 	arrays = []
-	for fobj in args.files:
-		chain = list(parse_pdb_chain(fobj))
-		arrays.append(torsion_array(chain))
+	for filepath in args.files:
+		with open(filepath) as fobj:
+			chain = list(parse_pdb_chain(fobj))
+			arrays.append(torsion_array(chain))
 
 	angles = np.concatenate(arrays, axis=0)
 
@@ -810,9 +836,11 @@ def main():
 		ramachandran_scatter(angles, degrees=not args.radians)
 
 	elif args.plottype == 'kde':
+		_assert_seaborn_available('kde')
 		ramachandran_kdeplot(angles, shade=True, degrees=not args.radians)
 
 	elif args.plottype == 'joint':
+		_assert_seaborn_available('joint')
 		ramachandran_jointplot(angles, kind='kde', degrees=not args.radians)
 
 	else:
@@ -820,7 +848,7 @@ def main():
 
 	# Plot title
 	if len(args.files) == 1:
-		filename = os.path.basename(args.files[0].name)
+		filename = os.path.basename(args.files[0])
 	else:
 		filename = '{} files'.format(len(args.files))
 
