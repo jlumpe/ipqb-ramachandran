@@ -345,107 +345,122 @@ def calc_dihedrals(points):
 		yield calculator.send(point)
 
 
-def get_backbone_atoms(residue):
-	"""Get the N, CA, and CB atoms from an amino acid residue.
-
-	Note that glycine residues seem to have a "C" atom in place of a "CB".
+def get_backbone_atoms(residue, strict=False):
+	"""Get the N, CA, and C atoms from an amino acid residue.
 
 	:param residue: Amino acid residue to get backbone atoms for.
 	:type residue: .PDBResidue
-	:returns: ``(N, CA, CB)`` atom tuple.
+	:param bool strict: Raise an exception if an atom cannot be found.
+	:returns: ``(N, CA, C)`` atom tuple.
 	:rtype: tuple[.PDBAtom]
 
-	:raises ValueError: If the residue is missing one of the atom type or has
-		multiple instances of it.
+	:raises ValueError: If ``strict`` is True and the residue is missing one of
+		the atom types or has multiple instances of it.
 	"""
 
-	# Glycines use C instead of CB
-	if residue.name == 'GLY':
-		names = ['N', 'CA', 'C']
-	else:
-		names = ['N', 'CA', 'C']
-
+	names = ['N', 'CA', 'C']
 	atoms = [None] * len(names)
 
 	# Find atoms
 	for atom in residue.atoms:
 		for i, name in enumerate(names):
 			if atom.name == name:
-				if atoms[i] is not None:
+				if strict and atoms[i] is not None:
 					raise ValueError('Duplicate {} atom in residue'.format(name))
 
 				atoms[i] = atom
 				break
 
 	# Check all found
-	for i, name in enumerate(names):
-		if atoms[i] is None:
-			raise ValueError('No {} atom found in residue'.format(name))
+	if strict:
+		for i, name in enumerate(names):
+			if atoms[i] is None:
+				raise ValueError('No {} atom found in residue'.format(name))
 
 	return tuple(atoms)
 
 
-def calc_torsion(residues, include_omega=False):
+def calc_torsion(residues, include_residue=False, include_omega=False):
 	"""Lazily calculate phi/psi torsion angles for an amino acid sequence.
 
-	The residues must have strictly increasing sequence IDs, but some positions
-	may be skipped. If a residue is not contiguous with the residues before and
-	after the angles returned will be None. The first residue will have None
-	values for omega and phi and the last will have a None value for psi.
+	This function attempts to handle invalid or non-contiguous residues
+	gracefully, yielding None for any dihedral angles derived from sets of atoms
+	that come from these.
 
 	:param residues: Iterable of amino acid residues as :class:`.PDBResidue`.
+	:param bool include_residue: Also yield residues along with angles.
 	:param bool include_omega: Also yield values for the omega angle.
 
-	:returns: Generator yielding ``(residue, phi, psi)`` tuples, or
-		``(residue, omega, phi, psi)`` if ``include_omega`` is True.
+	:returns: Generator yielding ``(residue, omega, phi, psi)`` tuples, with
+		``residue`` and ``omega`` omitted depending on the values of the
+		``include_residue`` and ``include_omega`` parameters.
 	"""
-
-	angle_calculator = dihedral_calculator()
-	angle_calculator.send(None)  # Prime it
 
 	last_residue = None
 	last_contiguous = True
+	last_valid = False
 
-	omega = None
-	phi = None
-	psi = None
+	last_omega = None
+	last_phi = None
+
+	def yield_vals(residue, omega, phi, psi):
+		angles = (omega, phi, psi) if include_omega else (phi, psi)
+		return (residue, *angles) if include_residue else angles
 
 	for residue in residues:
-		is_contiguous = last_residue is None or residue.seq == last_residue.seq + 1
+
+		# Whether this residue is contiguous with the last and angles calculated
+		# from that residue's atoms are valid
+		is_contiguous = last_valid and residue.seq == last_residue.seq + 1
+
+		# Reset the generator if not using atoms from last residue
+		if not is_contiguous:
+			angle_calculator = dihedral_calculator()
+			angle_calculator.send(None)  # Prime it
 
 		# Get N, CA, and C atoms from residue
-		backbone_coords = [a.coord for a in get_backbone_atoms(residue)]
+		backbone_atoms = get_backbone_atoms(residue)
 
-		# Psi ends with this residue's N, but belongs to previous
-		psi = angle_calculator.send(backbone_coords[0])
+		if None in backbone_atoms:
+			# Didn't get all backbone atoms - residue is invalid
+			is_valid = False
+			psi = omega = phi = None
 
+		else:
+			# Residue good
+			is_valid = True
+
+			# Get backbone atom coords and calculate angles for residue
+			backbone_coords = [a.coord for a in backbone_atoms]
+
+			psi = angle_calculator.send(backbone_coords[0])
+			omega = angle_calculator.send(backbone_coords[1])
+			phi = angle_calculator.send(backbone_coords[2])
+
+		# Yield angles for the previous residue (because calculating psi
+		# required an atom from this residue)
 		if last_residue is not None:
-			# Only yield if contiguous with adjacent residues
-			if is_contiguous and last_contiguous:
-				if include_omega:
-					yield last_residue, omega, phi, psi
-				else:
-					yield last_residue, phi, psi
+			yield yield_vals(
+				last_residue,
+				last_omega if last_contiguous else None,
+				last_phi if last_contiguous else None,
+				psi if is_contiguous else None,
+			)
 
-			else:
-				if include_omega:
-					yield last_residue, None, None, None
-				else:
-					yield last_residue, None, None
-
-		# Omega and phi end with this residue's CA and C atoms, will be yielded
-		# on the next loop
-		omega = angle_calculator.send(backbone_coords[1])
-		phi = angle_calculator.send(backbone_coords[2])
-
+		# Keep track of state for previous residue
 		last_residue = residue
 		last_contiguous = is_contiguous
+		last_valid = is_valid
+		last_omega = omega
+		last_phi = phi
 
 	# Last one is only partial - no value for psi
-	if include_omega:
-		yield last_residue, omega, phi, None
-	else:
-		yield last_residue, phi, None
+	yield yield_vals(
+		last_residue,
+		last_omega if last_contiguous else None,
+		last_phi if last_contiguous else None,
+		None
+	)
 
 
 def torsion_array(residues, include_ends=False, include_omega=False):
@@ -472,22 +487,13 @@ def torsion_array(residues, include_ends=False, include_omega=False):
 
 	torsion = calc_torsion(residues, include_omega=include_omega)
 
-	# First residue - no value for omega and phi
-	res, *angles = next(torsion)
-	if include_ends:
-		if include_omega:
-			array[0] = [np.nan, np.nan, angles[2]]
-		else:
-			array[0] = [np.nan, angles[1]]
+	# Skip first if needed
+	if not include_ends:
+		next(torsion)
 
-	# Middle residues
-	midrange = range(1, reslen - 1) if include_ends else range(reslen - 2)
-	for i, (res, *angles) in zip(midrange, torsion):
-		array[i] = angles
-
-	# Last residue - no value for psi
-	if include_ends:
-		res, *angles = next(torsion)
-		array[-1] = [*angles[:-1], np.nan]
+	# Insert values into array, subbing NaN for None
+	for i, angles in zip(range(nrow), torsion):
+		for j, a in enumerate(angles):
+			array[i, j] = np.nan if a is None else a
 
 	return array

@@ -45,14 +45,22 @@ def test_calc_dihedrals(residues):
 		assert np.isclose(angle1, angle2)
 
 
-@pytest.mark.parametrize('calc_omega', [False, True])
-def test_calc_torsion(residues, polypeptide, calc_omega):
+@pytest.mark.parametrize('include_residue', [False, True])
+@pytest.mark.parametrize('include_omega', [False, True])
+def test_calc_torsion(residues, polypeptide, include_residue, include_omega):
 	"""Test the calc_torsion function vs BioPython's version."""
 
-	torsion = [angles for res, *angles in ram.calc_torsion(residues)]
-	biopy_torsion = polypeptide.get_phi_psi_list()
+	torsion = list(ram.calc_torsion(residues, include_residue=include_residue,
+	                                include_omega=include_omega))
+	assert len(torsion) == len(residues)
 
-	assert len(torsion) == len(biopy_torsion)
+	# If residues included, check they match input and remove for comparison
+	if include_residue:
+		assert all(res1 == res2 for res1, (res2, *angles) in zip(residues, torsion))
+		torsion_angles = [angles for res, *angles in torsion]
+
+	else:
+		torsion_angles = torsion
 
 	# Apparently there is some significant numerical error in one of the two
 	# methods, so we need to use a lower tolerance than the default
@@ -62,8 +70,10 @@ def test_calc_torsion(residues, polypeptide, calc_omega):
 		else:
 			return np.isclose(x, y, rtol=1e-3)
 
-	for angles1, (phi2, psi2) in zip(torsion, biopy_torsion):
-		phi1, psi1 = angles1[-2:]
+	# Compare values for biopy version
+	biopy_torsion = polypeptide.get_phi_psi_list()
+	for angles1, (phi2, psi2) in zip(torsion_angles, biopy_torsion):
+		*_, phi1, psi1 = angles1
 
 		assert close(phi1, phi2)
 		assert close(psi1, psi2)
@@ -72,12 +82,9 @@ def test_calc_torsion(residues, polypeptide, calc_omega):
 @pytest.mark.parametrize('include_ends', [False, True])
 @pytest.mark.parametrize('include_omega', [False, True])
 def test_torsion_array(residues, include_ends, include_omega):
-	"""Test the calc_torsion function vs BioPython's version."""
+	"""Test the torsion_array function."""
 
-	torsion_list = [
-		angles for res, *angles in
-		ram.calc_torsion(residues, include_omega=include_omega)
-	]
+	torsion_list = list(ram.calc_torsion(residues, include_omega=include_omega))
 	torsion_array = ram.torsion_array(residues, include_ends=include_ends,
 	                                  include_omega=include_omega)
 
