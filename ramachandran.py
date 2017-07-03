@@ -385,7 +385,7 @@ def get_backbone_atoms(residue):
 	return tuple(atoms)
 
 
-def calc_torsion(residues, calc_omega=False):
+def calc_torsion(residues, include_omega=False):
 	"""Lazily calculate phi/psi torsion angles for an amino acid sequence.
 
 	The residues must have strictly increasing sequence IDs, but some positions
@@ -394,10 +394,10 @@ def calc_torsion(residues, calc_omega=False):
 	values for omega and phi and the last will have a None value for psi.
 
 	:param residues: Iterable of amino acid residues as :class:`.PDBResidue`.
-	:param bool calc_omega: Also yield values for the omega angle.
+	:param bool include_omega: Also yield values for the omega angle.
 
 	:returns: Generator yielding ``(residue, phi, psi)`` tuples, or
-		``(residue, omega, phi, psi)`` if ``calc_omega`` is True.
+		``(residue, omega, phi, psi)`` if ``include_omega`` is True.
 	"""
 
 	angle_calculator = dihedral_calculator()
@@ -422,13 +422,13 @@ def calc_torsion(residues, calc_omega=False):
 		if last_residue is not None:
 			# Only yield if contiguous with adjacent residues
 			if is_contiguous and last_contiguous:
-				if calc_omega:
+				if include_omega:
 					yield last_residue, omega, phi, psi
 				else:
 					yield last_residue, phi, psi
 
 			else:
-				if calc_omega:
+				if include_omega:
 					yield last_residue, None, None, None
 				else:
 					yield last_residue, None, None
@@ -442,7 +442,52 @@ def calc_torsion(residues, calc_omega=False):
 		last_contiguous = is_contiguous
 
 	# Last one is only partial - no value for psi
-	if calc_omega:
+	if include_omega:
 		yield last_residue, omega, phi, None
 	else:
 		yield last_residue, phi, None
+
+
+def torsion_array(residues, include_ends=False, include_omega=False):
+	"""Create a Numpy array of phi/psi torsion angles for an amino acid sequence.
+
+	:param residues: Sequence of :class:`.PDBResidue`.
+	:param bool include_ends: If True include angles for first and last residues,
+		which will contain NaN values. If False omit angles for first and last.
+	:parm bool include_omega: Include omega angles in first column of array.
+
+	:returns: Numpy array containing torsion angles for each residue in rows.
+		Columns are omega, phi and psi if ``include_omega`` is True or just phi
+		and psi otherwise.
+	:rtype: np.ndarray
+	"""
+	import numpy as np
+
+	residues = list(residues)
+	reslen = len(residues)
+
+	nrow = reslen if include_ends else reslen - 2
+	ncol = 3 if include_omega else 2
+	array = np.zeros((nrow, ncol))
+
+	torsion = calc_torsion(residues, include_omega=include_omega)
+
+	# First residue - no value for omega and phi
+	res, *angles = next(torsion)
+	if include_ends:
+		if include_omega:
+			array[0] = [np.nan, np.nan, angles[2]]
+		else:
+			array[0] = [np.nan, angles[1]]
+
+	# Middle residues
+	midrange = range(1, reslen - 1) if include_ends else range(reslen - 2)
+	for i, (res, *angles) in zip(midrange, torsion):
+		array[i] = angles
+
+	# Last residue - no value for psi
+	if include_ends:
+		res, *angles = next(torsion)
+		array[-1] = [*angles[:-1], np.nan]
+
+	return array
