@@ -13,6 +13,12 @@ from collections import namedtuple
 import math
 
 
+################################################################################
+#
+# Parsing and data types
+#
+################################################################################
+
 # Fields of an "ATOM" line in a PDB file
 # http://www.wwpdb.org/documentation/file-format-content/format33/sect9.html#ATOM
 PDB_ATOM_LINE_FIELDS = [
@@ -273,6 +279,12 @@ def parse_pdb_chain(fobj):
 		yield currentres
 
 
+################################################################################
+#
+# Dihedrals and torsion calculation
+#
+################################################################################
+
 def dihedral_calculator():
 	"""
 	Coroutine/generator which lazily calculates dihedral angles for each set of
@@ -462,6 +474,12 @@ def calc_torsion(residues, include_residue=False, include_omega=False):
 		None
 	)
 
+
+################################################################################
+#
+# Plotting
+#
+################################################################################
 
 def torsion_array(residues, include_ends=False, include_omega=False):
 	"""Create a Numpy array of phi/psi torsion angles for an amino acid sequence.
